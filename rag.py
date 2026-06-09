@@ -1,23 +1,18 @@
 import os
 from pathlib import Path
 
-import pymupdf4llm
-from llama_index.core import VectorStoreIndex, Document
-
 # Carrega variáveis do arquivo .env, se ele existir.
-# Se você não usar .env, o programa continuará lendo as variáveis do Windows.
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
 
-from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
-from llama_index.core.storage.storage_context import StorageContext
-from llama_index.vector_stores.faiss import FaissVectorStore
+import pymupdf4llm
+
+from llama_index.core import VectorStoreIndex, Document
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.openai import OpenAIResponses
-
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.prompts import PromptTemplate
 
@@ -25,24 +20,24 @@ from llama_index.core.prompts import PromptTemplate
 # =========================
 # CONFIGURAÇÕES
 # =========================
-DOCS_PATH = "./docs"
 
-# Modelo OpenAI utilizado pelo RAG
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+BASE_DIR = Path(__file__).resolve().parent
+DOCS_PATH = BASE_DIR / "docs"
 
-# Por padrão, mantém embeddings locais.
-# Se quiser melhorar a recuperação dos documentos usando embeddings da OpenAI,
-# defina no .env:
-# USE_OPENAI_EMBEDDINGS=true
-USE_OPENAI_EMBEDDINGS = os.getenv("USE_OPENAI_EMBEDDINGS", "false").lower() == "true"
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+
+USE_OPENAI_EMBEDDINGS = (
+    os.getenv("USE_OPENAI_EMBEDDINGS", "false").lower() == "true"
+)
 
 
 # =========================
 # PROMPT
 # =========================
+
 QA_PROMPT = PromptTemplate(
 """
-Você é um assistente de helpdesk predial para escolas Fatecs, Etecs e Administração Central.
+Você é um assistente de helpdesk predial para escolas (Fatecs e Etecs).
 
 Responda SEMPRE em português do Brasil (PT-BR), com linguagem clara, educada e profissional.
 
@@ -57,8 +52,8 @@ Regras importantes:
 - NÃO invente informações fora do contexto.
 - Respostas totalmente em português do Brasil, PT-BR, com linguagem clara, educada e profissional.
 - Caso a pergunta não tenha relação com manutenção predial, você deve informar que não há relação e que não poderá ajudar.
-- Se não houver informações suficientes no contexto, responda exatamente:
-"Não encontrei informações suficientes nos documentos para responder com segurança. Por favor, forneça mais detalhes."
+- Se não houver informação suficiente no contexto, responda exatamente:
+"Não encontrei informações suficientes nos documentos para responder com segurança."
 
 Instruções para análise do contexto:
 - Antes de responder, verifique cuidadosamente se algum trecho do contexto responde à pergunta.
@@ -82,10 +77,9 @@ Resposta:
 # =========================
 # DOCUMENTOS
 # =========================
-def load_documents():
-    docs_path = Path(DOCS_PATH)
 
-    if not docs_path.exists():
+def load_documents():
+    if not DOCS_PATH.exists():
         raise RuntimeError(
             f"A pasta de documentos '{DOCS_PATH}' não foi encontrada. "
             "Verifique se a pasta docs existe na raiz do projeto."
@@ -93,7 +87,7 @@ def load_documents():
 
     documents = []
 
-    for file_path in sorted(docs_path.rglob("*")):
+    for file_path in sorted(DOCS_PATH.rglob("*")):
         if file_path.is_dir():
             continue
 
@@ -127,7 +121,10 @@ def load_documents():
             )
 
         elif suffix in [".txt", ".md"]:
-            text = file_path.read_text(encoding="utf-8", errors="ignore").strip()
+            text = file_path.read_text(
+                encoding="utf-8",
+                errors="ignore"
+            ).strip()
 
             if text:
                 documents.append(
@@ -153,17 +150,17 @@ def load_documents():
 # =========================
 # EMBEDDINGS
 # =========================
+
 def load_embedding_model():
     api_key = os.getenv("OPENAI_API_KEY")
 
     if USE_OPENAI_EMBEDDINGS:
         if not api_key:
             raise RuntimeError(
-                "USE_OPENAI_EMBEDDINGS=true foi definido, mas OPENAI_API_KEY não foi encontrada."
+                "USE_OPENAI_EMBEDDINGS=true foi definido, "
+                "mas OPENAI_API_KEY não foi encontrada."
             )
 
-        # Embedding da OpenAI.
-        # Melhora a recuperação semântica, mas envia os chunks dos documentos para a API.
         from llama_index.embeddings.openai import OpenAIEmbedding
 
         embed_model = OpenAIEmbedding(
@@ -174,8 +171,6 @@ def load_embedding_model():
         dimension = 1536
 
     else:
-        # Embedding local.
-        # Não envia os documentos para a OpenAI na etapa de indexação.
         embed_model = HuggingFaceEmbedding(
             model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
@@ -186,8 +181,9 @@ def load_embedding_model():
 
 
 # =========================
-# INDEXAÇÃO COM CHUNKING
+# INDEXAÇÃO SEM FAISS
 # =========================
+
 def create_index():
     documents = load_documents()
 
@@ -208,8 +204,9 @@ def create_index():
 
 
 # =========================
-# LLM - OPENAI GPT-5-MINI
+# LLM
 # =========================
+
 def load_llm():
     api_key = os.getenv("OPENAI_API_KEY")
 
@@ -222,20 +219,11 @@ def load_llm():
     llm = OpenAIResponses(
         model=OPENAI_MODEL,
         api_key=api_key,
-
-        # Para RAG, mantenha deterministicidade.
         temperature=0.0,
-
-        # Em modelos GPT-5, use max_output_tokens.
-        # Evita respostas vazias por limite baixo de saída.
         max_output_tokens=1200,
-
-        # Raciocínio baixo para equilibrar custo/qualidade.
-        # Se quiser mais precisão, teste "medium".
         reasoning_options={
             "effort": "low"
         },
-
         timeout=120,
     )
 
@@ -245,22 +233,18 @@ def load_llm():
 # =========================
 # QUERY ENGINE
 # =========================
+
 def get_query_engine(debug=False):
     index = create_index()
     llm = load_llm()
 
     query_engine = index.as_query_engine(
         llm=llm,
-
-        # Aumentei de 5 para 8 para enviar mais trechos relevantes ao modelo.
-        # Isso pode melhorar respostas quando a informação está espalhada no PDF.
         similarity_top_k=8,
-
         text_qa_template=QA_PROMPT,
         response_mode="compact"
     )
 
-    # Wrapper opcional para debug no terminal
     if debug:
         original_query = query_engine.query
 
