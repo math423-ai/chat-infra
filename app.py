@@ -79,7 +79,7 @@ def extract_sources(response):
 
 st.set_page_config(page_title="Chatbot RAG", layout="wide")
 
-st.title("Helpdesk Predial")
+st.title("HelpDesk Infraestrutura")
 
 # Opcional: mostra onde o log está sendo salvo
 # st.sidebar.caption(f"Arquivo de log: {LOG_FILE}")
