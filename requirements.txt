@@ -1,10 +1,9 @@
 streamlit
 python-dotenv
-faiss-cpu
 llama-index
-llama-index-vector-stores-faiss
 llama-index-embeddings-huggingface
 llama-index-llms-openai
 sentence-transformers
-pypdf
+pymupdf
+pymupdf4llm
 openai

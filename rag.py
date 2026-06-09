@@ -1,5 +1,8 @@
 import os
-import faiss
+from pathlib import Path
+
+import pymupdf4llm
+from llama_index.core import VectorStoreIndex, Document
 
 # Carrega variáveis do arquivo .env, se ele existir.
 # Se você não usar .env, o programa continuará lendo as variáveis do Windows.
@@ -80,18 +83,68 @@ Resposta:
 # DOCUMENTOS
 # =========================
 def load_documents():
-    if not os.path.exists(DOCS_PATH):
+    docs_path = Path(DOCS_PATH)
+
+    if not docs_path.exists():
         raise RuntimeError(
             f"A pasta de documentos '{DOCS_PATH}' não foi encontrada. "
             "Verifique se a pasta docs existe na raiz do projeto."
         )
 
-    documents = SimpleDirectoryReader(DOCS_PATH).load_data()
+    documents = []
+
+    for file_path in sorted(docs_path.rglob("*")):
+        if file_path.is_dir():
+            continue
+
+        suffix = file_path.suffix.lower()
+
+        if suffix == ".pdf":
+            try:
+                text = pymupdf4llm.to_markdown(str(file_path))
+            except Exception as e:
+                raise RuntimeError(
+                    f"Erro ao extrair texto do PDF '{file_path.name}': {e}"
+                )
+
+            text = text.strip()
+
+            if not text:
+                raise RuntimeError(
+                    f"O PDF '{file_path.name}' não retornou texto. "
+                    "Ele pode ser um PDF escaneado como imagem. Nesse caso será necessário OCR."
+                )
+
+            documents.append(
+                Document(
+                    text=text,
+                    metadata={
+                        "file_name": file_path.name,
+                        "file_path": str(file_path),
+                        "file_type": "pdf",
+                    },
+                )
+            )
+
+        elif suffix in [".txt", ".md"]:
+            text = file_path.read_text(encoding="utf-8", errors="ignore").strip()
+
+            if text:
+                documents.append(
+                    Document(
+                        text=text,
+                        metadata={
+                            "file_name": file_path.name,
+                            "file_path": str(file_path),
+                            "file_type": suffix.replace(".", ""),
+                        },
+                    )
+                )
 
     if not documents:
         raise RuntimeError(
-            "Nenhum documento foi encontrado na pasta docs. "
-            "Adicione arquivos PDF, TXT ou outros documentos compatíveis."
+            "Nenhum documento válido foi carregado. "
+            "Verifique se a pasta docs contém PDFs, TXT ou MD com texto extraível."
         )
 
     return documents
@@ -138,24 +191,15 @@ def load_embedding_model():
 def create_index():
     documents = load_documents()
 
-    embed_model, dimension = load_embedding_model()
+    embed_model, _ = load_embedding_model()
 
-    # Chunks um pouco menores ajudam a recuperação em PDFs com textos técnicos.
     parser = SentenceSplitter(
         chunk_size=384,
         chunk_overlap=80
     )
 
-    faiss_index = faiss.IndexFlatL2(dimension)
-
-    vector_store = FaissVectorStore(faiss_index=faiss_index)
-    storage_context = StorageContext.from_defaults(
-        vector_store=vector_store
-    )
-
     index = VectorStoreIndex.from_documents(
         documents,
-        storage_context=storage_context,
         embed_model=embed_model,
         transformations=[parser],
     )
